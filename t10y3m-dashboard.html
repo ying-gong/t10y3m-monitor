@@ -468,25 +468,43 @@
   });
 
   // ===== LIVE DATA FETCH =====
+  function yahooURL(symbol) {
+    return 'https://query1.finance.yahoo.com/v8/finance/chart/' + symbol + '?interval=1d&range=1d';
+  }
+  function viaProxy(url) {
+    return 'https://corsproxy.io/?' + encodeURIComponent(url);
+  }
+
+  async function fetchYahoo(url) {
+    var h = { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' };
+    // Try direct first (works on local file://)
+    try { var r = await fetch(url, { headers: h }); if (r.ok) return await r.json(); } catch(e){}
+    // Fallback: CORS proxy (works on GitHub Pages)
+    var r = await fetch(viaProxy(url), { headers: h });
+    return await r.json();
+  }
+
   window.fetchLiveData = async function() {
-    const btn = document.getElementById('btnRefresh');
+    var btn = document.getElementById('btnRefresh');
+    var status = document.getElementById('lastUpdate');
     btn.disabled = true;
     btn.textContent = '⏳ 获取中...';
 
     try {
-      const h = { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' };
-      const [tnxR, irxR] = await Promise.all([
-        fetch('https://query1.finance.yahoo.com/v8/finance/chart/^TNX?interval=1d&range=1d', { headers: h }).then(r => r.json()),
-        fetch('https://query1.finance.yahoo.com/v8/finance/chart/^IRX?interval=1d&range=1d', { headers: h }).then(r => r.json())
+      var [tnxR, irxR] = await Promise.all([
+        fetchYahoo(yahooURL('^TNX')),
+        fetchYahoo(yahooURL('^IRX'))
       ]);
       liveTnx = tnxR.chart.result[0].meta.regularMarketPrice;
       liveIrx = irxR.chart.result[0].meta.regularMarketPrice;
-      cachedCharts = {}; // clear cache to include new live point
+      cachedCharts = {};
       updateUI();
       renderChart(currentRange);
+      status.style.color = '#27ae60';
     } catch (e) {
       console.error('Fetch error:', e);
-      alert('实时数据获取失败，正在使用离线数据。请检查网络后重试。');
+      status.style.color = '#e74c3c';
+      status.textContent = '实时获取失败，显示离线数据';
     }
 
     btn.disabled = false;
