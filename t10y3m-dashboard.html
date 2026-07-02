@@ -565,8 +565,8 @@
   async function fetchYahoo(url) {
     var h = { 'User-Agent': 'Mozilla/5.0', 'Accept': 'application/json' };
     try { var r = await fetch(url, { headers: h }); if (r.ok) return await r.json(); } catch(e){}
-    var r = await fetch(viaProxy(url), { headers: h });
-    return await r.json();
+    try { var r = await fetch(viaProxy(url), { headers: h }); if (r.ok) return await r.json(); } catch(e){}
+    throw new Error('All fetch attempts failed');
   }
 
   window.fetchLiveData = async function() {
@@ -580,7 +580,16 @@
       liveIrx = irxR.chart.result[0].meta.regularMarketPrice;
       cachedCharts = {}; updateUI(); renderChart(currentRange);
       status.style.color = '#27ae60';
-    } catch(e) { console.error(e); status.style.color = '#e74c3c'; status.textContent = '实时获取失败'; }
+    } catch(e) {
+      console.error(e);
+      status.style.color = '#f39c12';
+      var isGitHub = location.hostname.includes('github.io');
+      if (isGitHub) {
+        status.innerHTML = 'GitHub Pages 受浏览器 CORS 限制，实时获取不可用。<br>建议在本地打开文件使用，或等待每日自动更新。';
+      } else {
+        status.textContent = '实时获取失败，请检查网络';
+      }
+    }
     btn.disabled = false; btn.textContent = '刷新实时数据';
   };
 
