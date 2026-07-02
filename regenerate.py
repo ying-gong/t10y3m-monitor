@@ -27,6 +27,24 @@ def fetch(symbol, rng):
             time.sleep(2)
     raise Exception(f'Failed to fetch {symbol} {rng}')
 
+def fetch_shiller_pe():
+    """Fetch Shiller PE data from datahub.io"""
+    url = 'https://datahub.io/core/s-and-p-500/r/data.csv'
+    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        lines = resp.read().decode('utf-8').strip().split('\n')
+    import csv, io, datetime
+    reader = csv.DictReader(io.StringIO('\n'.join(lines)))
+    rows = []
+    for r in reader:
+        pe10 = float(r['PE10']) if r['PE10'] and r['PE10'].strip() else 0.0
+        if pe10 > 0:
+            dt = datetime.datetime.strptime(r['Date'], '%Y-%m-%d')
+            ts = int((dt - datetime.datetime(1970, 1, 1)).total_seconds())
+            rows.append({'t': ts, 'v': round(pe10, 2)})
+    print(f'  Shiller PE: {len(rows)} monthly points, latest={rows[-1]["v"]} ({rows[-1]["t"]})')
+    return rows
+
 def main():
     print('Fetching all range data...')
     all_data = {}
@@ -65,20 +83,30 @@ def main():
     # Inline data into HTML
     ranges_js = json.dumps(ranges_data, separators=(',', ':'))
     live_js = json.dumps(live)
-    inline_block = f'\n  const RANGES_DATA = {ranges_js};\n  const LIVE_PRICES = {live_js};\n'
+
+    # Also fetch Shiller PE data
+    print('Fetching Shiller PE data...')
+    shiller_rows = fetch_shiller_pe()
+    shiller_js = json.dumps(shiller_rows, separators=(',', ':'))
 
     html_path = os.path.join(BASE, 't10y3m-dashboard.html')
     with open(html_path, 'r', encoding='utf-8') as f:
         html = f.read()
 
-    # Replace inline data block (between the marker comments)
     import re
-    pattern = r"(const RANGES_DATA = )\{.*?\};(?=\s*\n\s*const LIVE_PRICES)"
-    replacement = f"\\1{ranges_js};"
+    # Replace RANGES_DATA
+    pattern = r'(const RANGES_DATA = )\{.*?\};(?=\s*\n\s*const SHILLER_DATA)'
+    replacement = f'\\1{ranges_js};'
     html = re.sub(pattern, replacement, html, count=1, flags=re.DOTALL)
 
-    pattern2 = r"(const LIVE_PRICES = )\{.*?\};"
-    replacement2 = f"\\1{live_js};"
+    # Replace SHILLER_DATA
+    pattern_s = r'(const SHILLER_DATA = )\[.*?\];(?=\s*\n\s*const LIVE_PRICES)'
+    replacement_s = f'\\1{shiller_js};'
+    html = re.sub(pattern_s, replacement_s, html, count=1, flags=re.DOTALL)
+
+    # Replace LIVE_PRICES
+    pattern2 = r'(const LIVE_PRICES = )\{.*?\};'
+    replacement2 = f'\\1{live_js};'
     html = re.sub(pattern2, replacement2, html, count=1)
 
     with open(html_path, 'w', encoding='utf-8') as f:
