@@ -28,22 +28,44 @@ def fetch(symbol, rng):
     raise Exception(f'Failed to fetch {symbol} {rng}')
 
 def fetch_shiller_pe():
-    """Fetch Shiller PE data from datahub.io"""
-    url = 'https://datahub.io/core/s-and-p-500/r/data.csv'
-    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        lines = resp.read().decode('utf-8').strip().split('\n')
-    import csv, io, datetime
-    reader = csv.DictReader(io.StringIO('\n'.join(lines)))
-    rows = []
-    for r in reader:
-        pe10 = float(r['PE10']) if r['PE10'] and r['PE10'].strip() else 0.0
-        if pe10 > 0:
-            dt = datetime.datetime.strptime(r['Date'], '%Y-%m-%d')
-            ts = int((dt - datetime.datetime(1970, 1, 1)).total_seconds())
-            rows.append({'t': ts, 'v': round(pe10, 2)})
-    print(f'  Shiller PE: {len(rows)} monthly points, latest={rows[-1]["v"]} ({rows[-1]["t"]})')
-    return rows
+    """Fetch Shiller PE data from multpl.com (primary, monthly data since 1871)"""
+    import re, datetime
+    all_rows = []
+    for page in range(1, 10):
+        url = f'https://www.multpl.com/shiller-pe/table/by-month?page={page}'
+        req = urllib.request.Request(url, headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'text/html'
+        })
+        try:
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                html = resp.read().decode('utf-8')
+        except Exception as e:
+            print(f'  multpl.com page {page}: {e}')
+            break
+        
+        rows = re.findall(r'<tr[^>]*>\s*<td>(.*?)</td>\s*<td>\s*(?:&#x2002;\s*)?([\d.]+)', html)
+        if not rows: break
+        
+        for date_str, val_str in rows:
+            if 'Date' in date_str: continue
+            try:
+                val = float(val_str.strip())
+                dt = datetime.datetime.strptime(date_str.strip(), '%b %d, %Y')
+                ts = int((dt - datetime.datetime(1970, 1, 1)).total_seconds())
+                all_rows.append({'t': ts, 'v': round(val, 2)})
+            except: pass
+    
+    # Sort, deduplicate
+    all_rows.sort(key=lambda r: r['t'])
+    seen, unique = set(), []
+    for r in all_rows:
+        if r['t'] not in seen:
+            seen.add(r['t'])
+            unique.append(r)
+    
+    print(f'  Shiller PE (multpl.com): {len(unique)} monthly points, latest={unique[-1]["v"]}')
+    return unique
 
 def main():
     print('Fetching all range data...')
