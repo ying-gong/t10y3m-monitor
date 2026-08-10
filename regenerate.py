@@ -13,7 +13,7 @@ def fetch(symbol, rng):
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         'Accept': 'application/json'
     })
-    for attempt in range(3):
+    for attempt in range(4):
         try:
             with urllib.request.urlopen(req, timeout=30) as resp:
                 data = json.loads(resp.read())
@@ -21,10 +21,12 @@ def fetch(symbol, rng):
             timestamps = result['timestamp']
             closes = result['indicators']['quote'][0]['close']
             valid = [(t, round(c, 4)) for t, c in zip(timestamps, closes) if c is not None]
+            time.sleep(1.5)  # Rate-limit: pause between successful calls
             return valid
         except Exception as e:
-            print(f'  Retry {attempt+1}: {e}')
-            time.sleep(2)
+            wait = 3 * (attempt + 1)
+            print(f'  Retry {attempt+1}: {e}, waiting {wait}s')
+            time.sleep(wait)
     raise Exception(f'Failed to fetch {symbol} {rng}')
 
 def fetch_shiller_pe():
@@ -76,15 +78,27 @@ def main():
             all_data[key] = fetch(sym, rng)
             print(f'  {sym} {label}: {len(all_data[key])} pts')
 
-    # Live prices
+    # Live prices — use retry wrapper to handle transient 403s
     live = {}
     for sym in ['^TNX', '^IRX']:
-        data = fetch(sym, '1d')
         url = f'https://query1.finance.yahoo.com/v8/finance/chart/{sym}?interval=1d&range=1d'
-        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-        with urllib.request.urlopen(req, timeout=15) as resp:
-            j = json.loads(resp.read())
-        live[sym] = j['chart']['result'][0]['meta']['regularMarketPrice']
+        req = urllib.request.Request(url, headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Accept': 'application/json'
+        })
+        last_err = None
+        for attempt in range(3):
+            try:
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    j = json.loads(resp.read())
+                live[sym] = j['chart']['result'][0]['meta']['regularMarketPrice']
+                break
+            except Exception as e:
+                last_err = e
+                print(f'  Live price {sym} retry {attempt+1}: {e}')
+                time.sleep(2)
+        else:
+            raise Exception(f'Failed to fetch live price for {sym}: {last_err}')
 
     spread = round(live['^TNX'] - live['^IRX'], 4)
     print(f'Live: TNX={live["^TNX"]}, IRX={live["^IRX"]}, Spread={spread}')
